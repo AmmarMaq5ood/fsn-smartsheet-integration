@@ -1,0 +1,15 @@
+# secrets and runtime state (the server keeps the only copies)
+server/config.php
+server/cache/
+server/data/
+server/logs/
+
+# client data captured while debugging: LP payloads, Smartsheet exports, API dumps
+runs/
+*.xlsx
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,104 @@
+# Lint + test on every push and PR; on main, sync server/ to the VPS over SSH.
+#
+# Secrets (repo -> Settings -> Secrets and variables -> Actions):
+#   DEPLOY_HOST  2.24.203.63
+#   DEPLOY_USER  launchpadinnovations-webhook
+#   DEPLOY_KEY   private half of ~/.ssh/fsn-smartsheet_deploy (public half is in the user's authorized_keys)
+#   HEALTH_KEY   the inbound_key from config.php (optional: enables the post-deploy health check)
+#
+# Until DEPLOY_KEY exists the deploy job is skipped with a notice, so checks still run.
+# config.php, cache/, data/ and logs/ on the server are never touched.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-fsn-smartsheet
+  cancel-in-progress: false
+
+env:
+  DEPLOY_PATH: /home/launchpadinnovations-webhook/htdocs/webhook.launchpadinnovations.ai/fsn-smartsheet
+  HEALTH_URL: https://webhook.launchpadinnovations.ai/fsn-smartsheet/health.php
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_sqlite, sqlite3, mbstring, curl, json
+          coverage: none
+
+      - name: Lint every PHP file
+        run: find server -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Offline tests
+        run: php server/tests/run.php
+
+  deploy:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Are the deploy secrets set?
+        id: gate
+        env:
+          KEY: ${{ secrets.DEPLOY_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$HOST" ] || [ -z "$USER" ]; then
+            echo "::notice::DEPLOY_KEY / DEPLOY_HOST / DEPLOY_USER not set, skipping the deploy step"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install the deploy key
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          KEY: ${{ secrets.DEPLOY_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync server/ to the VPS
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          rsync -az --delete --itemize-changes \
+            --exclude 'config.php' \
+            --exclude 'cache/' \
+            --exclude 'data/' \
+            --exclude 'logs/' \
+            --exclude 'tests/' \
+            -e "ssh -i ~/.ssh/deploy -o BatchMode=yes -o StrictHostKeyChecking=yes" \
+            server/ "$USER@$HOST:$DEPLOY_PATH/"
+
+      - name: Health check
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          HEALTH_KEY: ${{ secrets.HEALTH_KEY }}
+        run: |
+          if [ -z "$HEALTH_KEY" ]; then
+            echo "::notice::HEALTH_KEY not set, checking only that the endpoint answers"
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL")
+            [ "$code" = "401" ] || { echo "expected 401 without key, got $code"; exit 1; }
+            echo "endpoint answers ($code without key)"
+          else
+            curl -fsS "$HEALTH_URL?key=$HEALTH_KEY&deep=1" | head -c 800; echo
+          fi
