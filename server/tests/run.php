@@ -1,7 +1,7 @@
 <?php
 /**
  * Offline tests. Run:  php tests/run.php
- * Uses the real LP payloads saved in ../runs and a fake Smartsheet backed by canned data.
+ * Uses sanitised LP payloads from tests/fixtures (real structure, fake people) and a fake Smartsheet.
  */
 declare(strict_types=1);
 
@@ -111,27 +111,27 @@ function check(string $name, bool $ok, string $detail = ''): void
 }
 function payload(string $file): Payload
 {
-    $d = json_decode((string)file_get_contents(APP_ROOT . "/../runs/$file.json"), true);
-    return new Payload($d['operations'][0]['output']['Bundle 1']);
+    $d = json_decode((string)file_get_contents(APP_ROOT . "/tests/fixtures/$file.json"), true);
+    return new Payload($d);
 }
 
 $schoolCols = array_merge(
     ['ID', 'SED', 'SCHOOL NAME', 'Program ID', 'SED Code (Look up in NYS Public Schools List )'],
     array_keys($CONFIG['sheets']['schools']['map'])
 );
-$ylim     = payload('kuvana_011537');     // real school signer w/o school name (dup record)
-$sandra   = payload('sandra_204959');     // staff
-$anast    = payload('anastasia_204512');  // staff
+$ylim     = payload('school_signer');   // school signer without a school name field (dup record)
+$sandra   = payload('staff_sent');      // staff, Doc Sent
+$anast    = payload('staff_signed');    // staff, Doc Signed
 
 echo "Payload rules\n";
-check('fullName', $sandra->rule('fullName') === 'Sandra Hall', (string)$sandra->rule('fullName'));
+check('fullName', $sandra->rule('fullName') === 'Sally Staffer', (string)$sandra->rule('fullName'));
 check('sowUrl from customData', str_starts_with((string)$sandra->rule('sowUrl'), 'https://go.foodstreamnetwork.com/'));
 check('schoolName falls back to Organization Name', $ylim->schoolName() === 'P12X, Lewis and Clark School', (string)$ylim->schoolName());
 check('schoolName uses Business Name', $sandra->schoolName() === 'FoodStream Network', (string)$sandra->schoolName());
 check('quoted path', $sandra->get('customData."LP Contact Source"') === 'Sustainability Impact Report 2026');
 check('interpolation null when all empty', $sandra->resolve('{{customData."LP City"}}') === null);
-check('interpolation mixed', $sandra->resolve('{{first_name}} / {{customData."LP City"}}') === 'Sandra /');
-$withDoc = new Payload(array_merge($sandra->raw(), ['SOW Document Name' => 'Assistant Educator Services SOW - Sandra']));
+check('interpolation mixed', $sandra->resolve('{{first_name}} / {{customData."LP City"}}') === 'Sally /');
+$withDoc = new Payload(array_merge($sandra->raw(), ['SOW Document Name' => 'Assistant Educator Services SOW - Sally']));
 check('staff gate by doc name', $withDoc->isStaffDocument($CONFIG['staff_keywords']) === true);
 check('staff gate passes empty name', $sandra->isStaffDocument($CONFIG['staff_keywords']) === false);
 
@@ -150,7 +150,7 @@ check('created', $r['action'] === 'create', json_encode($r));
 $new = $fake->rows[$r['rowId']] ?? [];
 check('school name set from Organization Name', ($new['SCHOOL NAME'] ?? '') === 'P12X, Lewis and Clark School', json_encode($new));
 check('SOW link written', str_starts_with($new['LP SOW Sent'] ?? '', 'https://'));
-check('contact id written', ($new['LP Contact ID'] ?? '') === 'QEBzN1DWgmorYR1PQDVt');
+check('contact id written', ($new['LP Contact ID'] ?? '') === 'CONTACT0SCHOOL0001');
 check('empty values not written', !array_key_exists('LP City', $new) || $new['LP City'] !== '');
 
 echo "\nSchools sync: second event for same contact -> update same row\n";
@@ -202,12 +202,12 @@ $sandraDoc = new Payload(array_merge($sandra->raw(), ['SOW Document Name' => 'As
 $r = $sync->run('educators', $CONFIG['sheets']['educators'], $sandraDoc);
 check('created', $r['action'] === 'create', json_encode($r));
 $row = $fake->rows[$r['rowId']] ?? [];
-check('name written', ($row['Educator Name'] ?? '') === 'Sandra Hall', json_encode($row));
+check('name written', ($row['Educator Name'] ?? '') === 'Sally Staffer', json_encode($row));
 check('school/site from business name', ($row['School / Site'] ?? '') === 'FoodStream Network');
 check('primary column = doc name', ($row['Primary Column'] ?? '') === 'Assistant Educator Services SOW');
 $r2 = $sync->run('educators', $CONFIG['sheets']['educators'], $sandraDoc);
 check('signed event updates same row (by link)', $r2['action'] === 'update' && $r2['rowId'] === $r['rowId'] && $r2['matchedBy'] === 'sow link', json_encode($r2));
-$fake2 = new FakeSmartsheet($eduCols, [5 => ['Educator Name' => 'Sandra Hall', 'Educator SOW' => '']]);
+$fake2 = new FakeSmartsheet($eduCols, [5 => ['Educator Name' => 'Sally Staffer', 'Educator SOW' => '']]);
 $r3 = (new Sync($fake2, false))->run('educators', $CONFIG['sheets']['educators'], $sandraDoc);
 check('hand-made row matched by name when link empty', $r3['action'] === 'update' && $r3['rowId'] === 5, json_encode($r3));
 check('no contact id column needed', !in_array('LP Contact ID', $eduCols, true));
@@ -266,7 +266,7 @@ if (!extension_loaded('pdo_sqlite')) {
     }
     $errs = Store::events(['status' => 'error']);
     check('failure rethrown and stored as error', $threw && count($errs) === 1 && str_contains((string)$errs[0]['error'], 'Smartsheet down'), json_encode($errs));
-    check('free-text filter', count(Store::events(['q' => 'Kuvana'])) === 3, (string)count(Store::events(['q' => 'Kuvana'])));
+    check('free-text filter', count(Store::events(['q' => 'Kay'])) === 3, (string)count(Store::events(['q' => 'Kay'])));
     check('count with filter', Store::count(['sheet' => 'schools']) === 3 && Store::count(['sheet' => 'educators']) === 0);
     $stats = Store::stats();
     check('stats 24h', ($stats['24h']['total'] ?? 0) === 3 && ($stats['24h']['error'] ?? 0) === 1 && ($stats['24h']['create'] ?? 0) === 1 && ($stats['24h']['update'] ?? 0) === 1, json_encode($stats['24h'] ?? null));
@@ -274,7 +274,7 @@ if (!extension_loaded('pdo_sqlite')) {
     @mkdir($logDir);
     $lines = [
         '<?php http_response_code(403); exit; ?>',
-        json_encode(['t' => '2026-10-20T10:00:00+00:00', 'rid' => 'imp001', 'lvl' => 'info', 'ev' => 'inbound', 'ctx' => ['sheet' => 'educators', 'contact' => 'C1', 'name' => 'Sandra Hall', 'company' => 'FSN', 'doc' => 'Assistant Educator SOW', 'url' => 'https://x/doc', 'opp' => null, 'trigger' => 'Staff - Doc Sent']]),
+        json_encode(['t' => '2026-10-20T10:00:00+00:00', 'rid' => 'imp001', 'lvl' => 'info', 'ev' => 'inbound', 'ctx' => ['sheet' => 'educators', 'contact' => 'C1', 'name' => 'Sally Staffer', 'company' => 'FSN', 'doc' => 'Assistant Educator SOW', 'url' => 'https://x/doc', 'opp' => null, 'trigger' => 'Staff - Doc Sent']]),
         json_encode(['t' => '2026-10-20T10:00:01+00:00', 'rid' => 'imp001', 'lvl' => 'info', 'ev' => 'sync_create', 'ctx' => ['sheet' => 'educators', 'action' => 'create', 'rowId' => 123, 'cells' => 4]]),
         json_encode(['t' => '2026-10-21T10:00:00+00:00', 'rid' => 'imp002', 'lvl' => 'info', 'ev' => 'inbound', 'ctx' => ['sheet' => 'schools', 'contact' => 'C2', 'name' => 'X Y', 'company' => 'PS 1', 'doc' => null, 'url' => null, 'opp' => 'O1', 'trigger' => 'Pipeline stage changed']]),
         json_encode(['t' => '2026-10-21T10:00:01+00:00', 'rid' => 'imp002', 'lvl' => 'error', 'ev' => 'smartsheet_api_error', 'ctx' => ['status' => 400, 'body' => 'CANT_EDIT_LOCKED_COLUMN']]),
