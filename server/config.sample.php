@@ -115,6 +115,16 @@ return [
             'map_on_create' => [
                 'Primary Column' => ['first' => ['customData."LP SOW Name"', 'SOW Document Name', 'full_name']],
             ],
+            // Slack posts after a successful sync. Empty slack_webhook = rule off.
+            'notify' => [
+                [
+                    'name'          => 'Program Manager SOWs -> #sow-program-managers',
+                    'when_doc'      => ['program manager'],
+                    'on'            => ['sent', 'signed'],     // "signed" = fired by a Doc Signed workflow
+                    'slack_webhook' => '',                     // Slack incoming webhook URL for the private channel
+                    'title'         => 'Program Manager SOW',
+                ],
+            ],
         ],
     ],
 ];

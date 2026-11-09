@@ -66,6 +66,8 @@ final class Pipeline
 
         Store::finish($eventId, $result, (int)round((microtime(true) - $t0) * 1000));
         $result['eventId'] = $eventId;
+        // Slack etc. Logged under the same request id, so the dashboard shows it with the event.
+        $result['notified'] = Notify::run($config['sheets'][$sheetKey]['notify'] ?? [], $sheetKey, $p, $result, (bool)($config['dry_run'] ?? true));
         return $result;
     }
 }

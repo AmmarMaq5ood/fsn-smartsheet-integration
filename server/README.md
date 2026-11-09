@@ -97,6 +97,17 @@ Storage is SQLite (`lib/Store.php`) in `data/` under an unguessable file name; `
 empty `index.html` sit beside it. Never upload or download `data/`. If `pdo_sqlite` is missing the
 store switches itself off, webhooks keep working, and `health.php` reports the reason.
 
+## Slack notifications
+
+Each sheet can carry `notify` rules (see `config.sample.php`). After a successful create or update,
+a rule whose `when_doc` keywords match the document name posts to its Slack incoming webhook.
+`on` limits it to `sent`, `signed` or both; "signed" means the LP workflow that fired has "Signed"
+in its name (Staff - Doc Signed -> Slack). A rule with an empty `slack_webhook` is off. Slack
+failures are logged (`notify_failed`) and shown in the dashboard but never fail the LP webhook.
+
+Current rule: Program Manager SOWs (sent and signed) -> private channel #sow-program-managers,
+asked for by Rich on Nov 5 2026. The webhook URL lives only in the server's config.php.
+
 ## Concurrency
 
 `lp.php` takes an exclusive file lock per `sheet + contact_id` (`cache/locks/`) for the duration of

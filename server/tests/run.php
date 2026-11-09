@@ -292,5 +292,43 @@ if (!extension_loaded('pdo_sqlite')) {
     check('backfill idempotent', ($b2['imported'] ?? -1) === 0 && ($b2['existing'] ?? 0) === 2, json_encode($b2));
 }
 
+echo "\nNotify: Program Manager SOWs -> Slack\n";
+$posted = [];
+Notify::$poster = function (string $url, array $body) use (&$posted): array {
+    $posted[] = [$url, $body];
+    return [200, 'ok'];
+};
+$rules = [['name' => 'pm', 'when_doc' => ['program manager'], 'on' => ['sent', 'signed'], 'slack_webhook' => 'https://hooks.slack.com/services/T/B/X', 'title' => 'Program Manager SOW']];
+$pm = new Payload(array_merge($sandra->raw(), ['SOW Document Name' => '[Master/Staff] Contractor SOW_Foodstream LEARN_Program Manager - Sally', 'workflow' => ['name' => 'Staff - Doc Sent -> Slack']]));
+$n = Notify::run($rules, 'educators', $pm, ['action' => 'create', 'rowId' => 9001], false);
+check('posted once', count($posted) === 1 && ($n[0]['ok'] ?? false) === true, json_encode($n));
+check('message says sent, names the doc and contact', str_contains($posted[0][1]['text'], 'sent for signature') && str_contains($posted[0][1]['blocks'][1]['text']['text'], 'Sally Staffer') && str_contains($posted[0][1]['blocks'][1]['text']['text'], 'Open document'), json_encode($posted[0][1]));
+$pmSigned = new Payload(array_merge($pm->raw(), ['workflow' => ['name' => 'Staff - Doc Signed -> Slack']]));
+Notify::run($rules, 'educators', $pmSigned, ['action' => 'update', 'rowId' => 9001], false);
+check('signed event posts a signed message', count($posted) === 2 && str_contains($posted[1][1]['text'], 'signed'), $posted[1][1]['text'] ?? '');
+$edu = new Payload(array_merge($pm->raw(), ['SOW Document Name' => 'Assistant Educator Services SOW - Sally']));
+Notify::run($rules, 'educators', $edu, ['action' => 'create', 'rowId' => 1], false);
+check('other staff documents ignored', count($posted) === 2);
+Notify::run($rules, 'educators', $pm, ['action' => 'skipped', 'reason' => 'x'], false);
+check('skipped events not announced', count($posted) === 2);
+Notify::run([['when_doc' => ['program manager'], 'slack_webhook' => '']], 'educators', $pm, ['action' => 'create'], false);
+check('rule without webhook is silent', count($posted) === 2);
+$n2 = Notify::run($rules, 'educators', $pm, ['action' => 'create', 'rowId' => 1], true);
+check('dry run posts nothing', count($posted) === 2 && ($n2[0]['dry'] ?? false) === true);
+Notify::$poster = fn(string $url, array $body): array => [500, 'boom'];
+$n3 = Notify::run($rules, 'educators', $pm, ['action' => 'create', 'rowId' => 1], false);
+check('slack failure reported, not thrown', ($n3[0]['ok'] ?? true) === false && ($n3[0]['status'] ?? 0) === 500, json_encode($n3));
+Notify::$poster = function (string $url, array $body) use (&$posted): array {
+    $posted[] = [$url, $body];
+    return [200, 'ok'];
+};
+$cfgN = $CONFIG;
+$cfgN['dry_run'] = false;
+$cfgN['lock_dir'] = sys_get_temp_dir() . '/fsn-test-locks-' . getmypid();
+$cfgN['sheets']['educators']['notify'] = $rules;
+$rp = Pipeline::run($cfgN, 'educators', $pm->raw(), 'webhook', null, new FakeSmartsheet($eduCols, []));
+check('pipeline notifies after a successful sync', count($posted) === 3 && ($rp['notified'][0]['ok'] ?? false) === true, json_encode($rp));
+Notify::$poster = null;
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);
