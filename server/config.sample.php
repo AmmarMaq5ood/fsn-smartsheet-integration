@@ -39,6 +39,7 @@ return [
         'schools' => [
             'sheet'           => ['id' => 6023663445823364],   // 1. LEARN | Program Launch Tracker
             'require'         => ['rule' => 'sowUrl'],
+            'reject_emails'   => ['rich@fsnnyc.com', 'rich@foodstreamnetwork.com'],   // countersigner, not a school
             'reject_if_staff' => true,
             'staff_keywords'  => ['contractor', 'educator', 'independent', 'staff', 'program manager'],
             'find' => [
@@ -99,6 +100,7 @@ return [
         'educators' => [
             'sheet'   => ['name' => 'Educator SOWs'],
             'require' => ['rule' => 'sowUrl'],
+            'reject_emails'        => ['rich@fsnnyc.com', 'rich@foodstreamnetwork.com'],   // Doc Signed fires for Rich's countersignature too
             'reject_doc_keywords'  => ['work order'],   // NYC DOE work orders share the staff workflows
             'require_doc_keywords' => ['contractor', 'educator', 'independent', 'staff', 'program manager'], // Doc Signed fires for school SOWs too
             'find' => [

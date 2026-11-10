@@ -7,6 +7,7 @@ declare(strict_types=1);
  * Sheet config keys:
  *   sheet          ['id' => 123] or ['name' => 'Educator SOWs']
  *   require        value spec; when it resolves empty the event is skipped (e.g. no SOW link)
+ *   reject_emails  list of contact emails to ignore (internal countersigners such as Rich)
  *   reject_if_staff bool, uses staff_keywords against the document name
  *   reject_doc_keywords list; skip when the document name contains any of them (e.g. work orders)
  *   require_doc_keywords list; skip unless the document name contains one of them
@@ -31,6 +32,15 @@ final class Sync
             $out['reason'] = 'required value missing';
             Log::info('sync_skip', $out);
             return $out;
+        }
+        // Internal signers (LP fires Doc Signed once per signer; Rich countersigns every SOW).
+        if (!empty($cfg['reject_emails'])) {
+            $email = mb_strtolower((string)($p->first('email', 'customData."LP Email"') ?? ''));
+            if ($email !== '' && in_array($email, array_map('mb_strtolower', (array)$cfg['reject_emails']), true)) {
+                $out['reason'] = 'internal signer';
+                Log::info('sync_skip', $out + ['email' => $email]);
+                return $out;
+            }
         }
         if (!empty($cfg['reject_if_staff']) && $p->isStaffDocument($cfg['staff_keywords'] ?? [])) {
             $out['reason'] = 'staff document';

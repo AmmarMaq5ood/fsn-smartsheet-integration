@@ -292,6 +292,16 @@ if (!extension_loaded('pdo_sqlite')) {
     check('backfill idempotent', ($b2['imported'] ?? -1) === 0 && ($b2['existing'] ?? 0) === 2, json_encode($b2));
 }
 
+echo "
+Internal countersigner ignored on both sheets
+";
+$rich = new Payload(array_merge($sandra->raw(), ['email' => 'Rich@FSNNYC.com', 'first_name' => '', 'last_name' => '', 'full_name' => '', 'SOW Document Name' => 'Contractor SOW_Foodstream LEARN_Lead Educator_Anna']));
+$r = (new Sync(new FakeSmartsheet($eduCols, []), false))->run('educators', $CONFIG['sheets']['educators'], $rich);
+check('educators: skipped as internal signer', $r['action'] === 'skipped' && $r['reason'] === 'internal signer', json_encode($r));
+$richSchool = new Payload(array_merge($rich->raw(), ['SOW Document Name' => 'Foodstream LEARN - Food Explorers SOW - PS 1']));
+$r = (new Sync(new FakeSmartsheet($schoolCols, []), false))->run('schools', $CONFIG['sheets']['schools'], $richSchool);
+check('schools: skipped as internal signer', $r['action'] === 'skipped' && $r['reason'] === 'internal signer', json_encode($r));
+
 echo "\nNotify: Program Manager SOWs -> Slack\n";
 $posted = [];
 Notify::$poster = function (string $url, array $body) use (&$posted): array {

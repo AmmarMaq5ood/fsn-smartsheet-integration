@@ -74,6 +74,10 @@ name decides where it lands:
 | work order                                          | written to **LP WO Sent**                |
 | anything else                                       | written to **LP SOW Sent**               |
 
+LP fires "Documents & Contracts Signed" once per signer, and Rich countersigns every SOW, so his
+contact arrives as a second event. `reject_emails` on both sheets drops those (reason
+"internal signer"); without it the staff sheet got a nameless row holding his copy of the link.
+
 A Work Order event never clears the SOW link (empty values are not written on update), so a row ends
 up with both links. Mapping guards are `if_doc` / `unless_doc` on any array spec in `config.php`.
 
