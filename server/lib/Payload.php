@@ -104,10 +104,11 @@ final class Payload
         };
     }
 
-    /** Official School Name -> "School name:" -> Business Name -> Organization Name */
+    /** master-sheet name (set by Enrich) -> Official School Name -> "School name:" -> Business Name -> Organization Name */
     public function schoolName(): ?string
     {
         return $this->first(
+            'school.name',
             'Official School Name',
             'School name:',
             'customData."LP Business Name"',

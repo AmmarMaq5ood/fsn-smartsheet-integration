@@ -81,6 +81,17 @@ final class FakeSmartsheet extends Smartsheet
             $this->rows[$rid] = array_merge($this->rows[$rid] ?? [], $this->cellsToTitles($body[0]['cells']));
             return ['result' => [['id' => $rid]]];
         }
+        if ($method === 'GET' && preg_match('#^/sheets/\d+/rows/(\d+)$#', $path, $m)) {
+            $vals = $this->rows[(int)$m[1]] ?? [];
+            $ids = array_filter(array_map('intval', explode(',', (string)($query['columnIds'] ?? ''))));
+            $cells = [];
+            foreach ($this->cols as $title => $id) {
+                if ((!$ids || in_array($id, $ids, true)) && isset($vals[$title]) && $vals[$title] !== '') {
+                    $cells[] = ['columnId' => $id, 'value' => $vals[$title]];
+                }
+            }
+            return ['id' => (int)$m[1], 'cells' => $cells];
+        }
         throw new RuntimeException("fake: unhandled $method $path");
     }
 
@@ -92,6 +103,29 @@ final class FakeSmartsheet extends Smartsheet
             $out[$byId[(int)$c['columnId']]] = $c['value'];
         }
         return $out;
+    }
+}
+
+// ---------------------------------------------------------------- fake Launchpad
+final class FakeLaunchpad extends Launchpad
+{
+    public array $calls = [];
+
+    public function __construct(private array $contacts, private array $companies)
+    {
+        parent::__construct(['token' => 'test', 'location' => 'LOC']);
+    }
+
+    public function contact(string $id): ?array
+    {
+        $this->calls[] = "contact $id";
+        return $this->contacts[$id] ?? null;
+    }
+
+    public function company(string $id): ?array
+    {
+        $this->calls[] = "company $id";
+        return $this->companies[$id] ?? null;
     }
 }
 
@@ -117,7 +151,8 @@ function payload(string $file): Payload
 
 $schoolCols = array_merge(
     ['ID', 'SED', 'SCHOOL NAME', 'Program ID', 'SED Code (Look up in NYS Public Schools List )'],
-    array_keys($CONFIG['sheets']['schools']['map'])
+    array_keys($CONFIG['sheets']['schools']['map']),
+    array_keys($CONFIG['sheets']['schools']['map_if_empty'] ?? [])
 );
 $ylim     = payload('school_signer');   // school signer without a school name field (dup record)
 $sandra   = payload('staff_sent');      // staff, Doc Sent
@@ -353,6 +388,76 @@ $cfgN['sheets']['educators']['notify'] = $rules;
 $rp = Pipeline::run($cfgN, 'educators', $pm->raw(), 'webhook', null, new FakeSmartsheet($eduCols, []));
 check('pipeline notifies after a successful sync', count($posted) === 3 && ($rp['notified'][0]['ok'] ?? false) === true, json_encode($rp));
 Notify::$poster = null;
+
+echo "\nSchool enrichment: company + master sheet decide the school, whoever signed\n";
+$masterRows = [
+    1 => ['SED Code' => '307500012012', 'Popular Name' => 'PS 12 LEWIS AND CLARK SCHOOL', 'Legal Name' => 'PS 12 LEWIS AND CLARK SCHOOL', 'County Code' => '32',
+          'County Description' => 'BRONX', 'SchDistofLoc Code' => '307500', 'SchDistofLoc Description' => 'NYC SPEC SCHOOLS - DIST 75',
+          'Grade Organization Description' => 'Elementary', 'CEO FName' => 'KUVANA', 'CEO LName' => 'JONES SANDERS', 'CEO email' => 'KJones7@schools.nyc.gov', 'CEO Phone #' => '(718)000-0000'],
+    2 => ['SED Code' => '321000010226', 'Popular Name' => 'PS 226', 'County Code' => '32', 'County Description' => 'BRONX'],
+    3 => ['SED Code' => '307500011226', 'Popular Name' => 'PS 226', 'County Code' => '31', 'County Description' => 'NEW YORK'],
+];
+$dirCfg = ['sheet' => ['id' => 6217551959773060], 'ttl' => 0, 'cache_dir' => sys_get_temp_dir() . '/fsn-test-dir-' . getmypid()];
+$dir = new SchoolDirectory(new FakeSmartsheet(SchoolDirectory::COLUMNS, $masterRows), $dirCfg);
+check('directory loads the master', $dir->count() === 3, (string)$dir->count());
+$m = $dir->bySed('307500012012');
+check('lookup by SED', ($m['name'] ?? '') === 'PS 12 LEWIS AND CLARK SCHOOL' && $m['county'] === 'Bronx' && $m['principal_email'] === 'kjones7@schools.nyc.gov'
+    && $m['principal_name'] === 'Kuvana Jones Sanders' && $m['name_shared'] === false, json_encode($m));
+check('11-digit SED gets its leading zero', SchoolDirectory::normaliseSed('51101040001') === '051101040001');
+check('Excel-mangled SED is rejected', SchoolDirectory::normaliseSed('3.5311') === null && $dir->bySed('3.5311') === null);
+check('shared name flagged', ($dir->bySed('307500011226')['name_shared'] ?? null) === true);
+check('unknown SED is null', $dir->bySed('999999999999') === null);
+
+$lp = new FakeLaunchpad(
+    ['CONTACT0SCHOOL0001' => ['id' => 'CONTACT0SCHOOL0001', 'businessId' => 'BIZ1', 'companyName' => 'PS 12', 'email' => 'ap@schools.nyc.gov', 'customFields' => []]],
+    ['BIZ1' => ['name' => 'PS 12 LEWIS AND CLARK SCHOOL', 'sed_code' => '307500012012', 'dbn' => '75X012', 'address' => '562 Pugsley Ave',
+                'city' => 'Bronx', 'state' => 'NY', 'postalCode' => '10473', 'borough' => 'Bronx']]
+);
+$ap = payload('school_signer');   // a teacher / AP signing: no school fields of their own
+$s = Enrich::school($ap, $lp, $dir);
+check('SED from the company', $s['sed'] === '307500012012' && $s['company_id'] === 'BIZ1', json_encode($s));
+check('name is the master dropdown name', $s['name'] === 'PS 12 LEWIS AND CLARK SCHOOL');
+check('DBN + address from the company, county code + principal from the master',
+    $s['dbn'] === '75X012' && $s['address'] === '562 Pugsley Ave, Bronx, NY 10473' && $s['county_code'] === '32' && $s['principal_email'] === 'kjones7@schools.nyc.gov', json_encode($s));
+check('sources recorded', $s['source'] === ['company', 'master'], json_encode($s['source']));
+
+$noCompany = $ap->raw();
+$noCompany['SED Code'] = '321000010226';
+$s2 = Enrich::school(new Payload($noCompany), new FakeLaunchpad([], []), $dir);
+check('no company: SED from the contact, name still from the master', $s2['sed'] === '321000010226' && $s2['name'] === 'PS 226'
+    && $s2['source'] === ['contact', 'master'] && $s2['name_shared'] === true, json_encode($s2));
+$s3 = Enrich::school($ap, new FakeLaunchpad([], []), $dir);
+check('nothing known: all null, no exception', $s3['sed'] === null && $s3['name'] === null && $s3['source'] === []);
+$s4 = Enrich::school($ap, $lp, null);
+check('directory off: company facts only', $s4['sed'] === '307500012012' && $s4['name'] === null && $s4['dbn'] === '75X012');
+
+echo "\nPipeline with enrichment: the row is about the school; hand-picked values survive\n";
+$cfgE = $CONFIG;
+$cfgE['dry_run'] = false;
+$cfgE['lock_dir'] = sys_get_temp_dir() . '/fsn-test-locks-' . getmypid();
+$fakeS = new FakeSmartsheet($schoolCols, []);
+$r = Pipeline::run($cfgE, 'schools', $ap->raw(), 'webhook', null, $fakeS, $lp, $dir);
+$row = $fakeS->rows[$r['rowId']] ?? [];
+check('row created', $r['action'] === 'create', json_encode($r));
+check('SCHOOL NAME = master name for the company SED', ($row['SCHOOL NAME'] ?? '') === 'PS 12 LEWIS AND CLARK SCHOOL', json_encode($row));
+check('DBN, School Address, County Code written', ($row['DBN'] ?? '') === '75X012' && ($row['School Address'] ?? '') === '562 Pugsley Ave, Bronx, NY 10473'
+    && ($row['County Code'] ?? '') === '32', json_encode($row));
+check('contact id still written for matching', ($row['LP Contact ID'] ?? '') === 'CONTACT0SCHOOL0001');
+// Rich picks another school by hand and clears the DBN; a second event for the same contact arrives
+$fakeS->rows[$r['rowId']]['SCHOOL NAME'] = 'PS 226';
+$fakeS->rows[$r['rowId']]['DBN'] = '';
+$r2 = Pipeline::run($cfgE, 'schools', $ap->raw(), 'webhook', null, $fakeS, $lp, $dir);
+$row2 = $fakeS->rows[$r['rowId']];
+check('second event updates the same row', $r2['action'] === 'update' && $r2['rowId'] === $r['rowId'] && $r2['matchedBy'] === 'contact id', json_encode($r2));
+check('hand-picked SCHOOL NAME kept', $row2['SCHOOL NAME'] === 'PS 226', json_encode($row2));
+check('blank DBN filled in', $row2['DBN'] === '75X012', json_encode($row2));
+// a hand-made row carrying the master name and no ids is adopted, not duplicated
+$fakeM = new FakeSmartsheet($schoolCols, [77 => ['SCHOOL NAME' => 'PS 12 LEWIS AND CLARK SCHOOL']]);
+$r3 = Pipeline::run($cfgE, 'schools', $ap->raw(), 'webhook', null, $fakeM, $lp, $dir);
+check('manual row for the same school adopted by name', $r3['action'] === 'update' && $r3['rowId'] === 77 && $r3['matchedBy'] === 'school name', json_encode($r3));
+// nothing to enrich with: the old behaviour
+$r4 = Pipeline::run($cfgE, 'schools', $ap->raw(), 'webhook', null, new FakeSmartsheet($schoolCols, []), new FakeLaunchpad([], []), $dir);
+check('without company or SED the old fallbacks still create the row', $r4['action'] === 'create', json_encode($r4));
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

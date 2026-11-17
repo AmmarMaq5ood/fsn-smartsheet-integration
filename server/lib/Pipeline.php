@@ -11,10 +11,12 @@ final class Pipeline
      * @param string         $source   webhook | replay
      * @param int|null       $replayOf event id this run replays
      * @param Smartsheet|null $ss      injected client (tests); built from config when null
+     * @param Launchpad|null  $lp      injected LP reader (tests); built from config['lp'] when null
+     * @param SchoolDirectory|null $dir injected master-sheet directory (tests)
      * @return array Sync result plus 'eventId'
      * @throws Throwable when the sync fails; the failure is recorded in the store before rethrowing
      */
-    public static function run(array $config, string $sheetKey, array $data, string $source = 'webhook', ?int $replayOf = null, ?Smartsheet $ss = null): array
+    public static function run(array $config, string $sheetKey, array $data, string $source = 'webhook', ?int $replayOf = null, ?Smartsheet $ss = null, ?Launchpad $lp = null, ?SchoolDirectory $dir = null): array
     {
         if (!isset($config['sheets'][$sheetKey])) {
             throw new InvalidArgumentException("unknown sheet '$sheetKey'");
@@ -52,6 +54,20 @@ final class Pipeline
 
         try {
             $ss ??= new Smartsheet($config['smartsheet']);
+            if (!empty($config['sheets'][$sheetKey]['enrich'])) {
+                // School facts from the signer's company + the master sheet; best effort, never blocks the row.
+                $lp ??= new Launchpad($config['lp'] ?? []);
+                $dir ??= new SchoolDirectory($ss, $config['school_directory'] ?? []);
+                try {
+                    $school = Enrich::school($p, $lp, $dir);
+                    $data['school'] = $school;
+                    $p = new Payload($data);
+                    Log::info('enriched', ['sed' => $school['sed'], 'name' => $school['name'], 'company' => $school['company_name'],
+                        'dbn' => $school['dbn'], 'source' => implode('+', $school['source']), 'name_shared' => $school['name_shared']]);
+                } catch (Throwable $e) {
+                    Log::warn('enrich_failed', ['error' => $e->getMessage()]);
+                }
+            }
             $sync = new Sync($ss, (bool)($config['dry_run'] ?? true));
             $result = $sync->run($sheetKey, $config['sheets'][$sheetKey], $p);
         } catch (Throwable $e) {
@@ -65,6 +81,15 @@ final class Pipeline
         }
 
         Store::finish($eventId, $result, (int)round((microtime(true) - $t0) * 1000));
+        // Keep the master-sheet directory warm without making a webhook wait for the refetch.
+        if ($dir !== null && $dir->isStale()) {
+            register_shutdown_function(static function () use ($dir): void {
+                if (function_exists('fastcgi_finish_request')) {
+                    fastcgi_finish_request();
+                }
+                $dir->refresh();
+            });
+        }
         $result['eventId'] = $eventId;
         // Slack etc. Logged under the same request id, so the dashboard shows it with the event.
         $result['notified'] = Notify::run($config['sheets'][$sheetKey]['notify'] ?? [], $sheetKey, $p, $result, (bool)($config['dry_run'] ?? true));

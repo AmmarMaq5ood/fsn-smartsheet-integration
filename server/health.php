@@ -71,6 +71,19 @@ if (!empty($_GET['deep'])) {
             $checks[$key] = ['sheetId' => $id, 'columns' => count($cols), 'missing_columns' => array_values(array_unique($missing))];
         }
         $out['smartsheet'] = ['ok' => true, 'ms' => (int)round((microtime(true) - $t0) * 1000), 'sheets' => $checks];
+        // School enrichment: is the LP token set, and is the master-sheet directory loadable (also warms its cache)
+        $dir = new SchoolDirectory($ss, $CONFIG['school_directory'] ?? []);
+        $t1 = microtime(true);
+        $n = $dir->count();
+        $out['school_enrichment'] = [
+            'lp_token'       => (new Launchpad($CONFIG['lp'] ?? []))->enabled(),
+            'master_schools' => $n,
+            'master_from'    => $dir->loadedFrom(),
+            'ms'             => (int)round((microtime(true) - $t1) * 1000),
+        ];
+        if ($n === 0 && $dir->enabled()) {
+            $out['ok'] = false;
+        }
     } catch (Throwable $e) {
         $out['ok'] = false;
         $out['smartsheet'] = ['ok' => false, 'error' => $e->getMessage()];

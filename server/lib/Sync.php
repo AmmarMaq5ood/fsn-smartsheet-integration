@@ -16,6 +16,8 @@ declare(strict_types=1);
  *   create         bool, create a row when nothing is found
  *   map            [title => spec] written on both update and create
  *   map_on_create  [title => spec] written only when creating
+ *   map_if_empty   [title => spec] written on create, and on update only when the cell is still blank
+ *                  (a value someone picked by hand in the sheet is never overwritten)
  *   write_empty    bool, when false empty values are not written on update
  */
 final class Sync
@@ -87,6 +89,17 @@ final class Sync
         $cells = $this->resolveMap($cfg['map'] ?? [], $p);
 
         if ($rowId !== null) {
+            if (!empty($cfg['map_if_empty'])) {
+                $wanted = array_filter($this->resolveMap($cfg['map_if_empty'], $p), fn($v) => $v !== null && $v !== '');
+                if ($wanted) {
+                    $current = $this->ss->rowCells($sheetId, $rowId, array_keys($wanted));
+                    foreach ($wanted as $title => $v) {
+                        if (trim((string)($current[$title] ?? '')) === '') {
+                            $cells[$title] = $v;
+                        }
+                    }
+                }
+            }
             if (empty($cfg['write_empty'])) {
                 $cells = array_filter($cells, fn($v) => $v !== null && $v !== '');
             }
@@ -104,7 +117,7 @@ final class Sync
             return $out;
         }
 
-        $cells = array_merge($cells, $this->resolveMap($cfg['map_on_create'] ?? [], $p));
+        $cells = array_merge($cells, $this->resolveMap($cfg['map_if_empty'] ?? [], $p), $this->resolveMap($cfg['map_on_create'] ?? [], $p));
         $cells = array_filter($cells, fn($v) => $v !== null && $v !== '');
         $out = array_merge($out, ['action' => 'create', 'cells' => count($cells)]);
         if (!$this->dryRun) {

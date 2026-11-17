@@ -31,6 +31,19 @@ return [
         'column_cache_ttl' => 21600,
     ],
 
+    // Launchpad API (read only): the signer's company = the school record. Empty token = enrichment off.
+    'lp' => [
+        'base'     => 'https://services.leadconnectorhq.com',
+        'token'    => '',
+        'location' => '1jHzK7yy1RjdZGmCMlmu',
+        'timeout'  => 15,
+    ],
+    // Master list behind the PLT's SCHOOL NAME dropdown and lookups (Johanna's sheet), read by SED code, cached 6h.
+    'school_directory' => [
+        'sheet' => ['id' => 6217551959773060],   // NYS Public Schools Principal Contact Info
+        'ttl'   => 21600,
+    ],
+
     'staff_keywords' => ['contractor', 'educator', 'independent', 'staff', 'program manager'],
 
     'sheets' => [
@@ -39,6 +52,7 @@ return [
         'schools' => [
             'sheet'           => ['id' => 6023663445823364],   // 1. LEARN | Program Launch Tracker
             'require'         => ['rule' => 'sowUrl'],
+            'enrich'          => true,   // school facts from the signer's company + the master sheet (Enrich.php)
             'reject_emails'   => ['rich@fsnnyc.com', 'rich@foodstreamnetwork.com'],   // countersigner, not a school
             'reject_if_staff' => true,
             'staff_keywords'  => ['contractor', 'educator', 'independent', 'staff', 'program manager'],
@@ -89,8 +103,13 @@ return [
                 'LP Contact ID'                  => '{{contact_id}}',
                 'LP Opportunity ID'              => '{{customData."LP Opportunity ID"}}',
             ],
-            'map_on_create' => [
-                'SCHOOL NAME'                                   => ['rule' => 'schoolName'],
+            // From the school record, whoever signed. Written on create, and on update only while the cell is blank,
+            // so a name Rich picked from the dropdown by hand stays. SED / principal / borough / type are formulas on SCHOOL NAME.
+            'map_if_empty' => [
+                'SCHOOL NAME'    => ['rule' => 'schoolName'],   // master-sheet name for the school's SED, else the old fallbacks
+                'DBN'            => '{{school.dbn}}',
+                'School Address' => '{{school.address}}',
+                'County Code'    => '{{school.county_code}}',
             ],
         ],
 

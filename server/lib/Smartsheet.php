@@ -166,6 +166,24 @@ class Smartsheet
         return null;
     }
 
+    /** Current values of the given columns on one row: title => displayValue (missing = ''). */
+    public function rowCells(int $sheetId, int $rowId, array $titles): array
+    {
+        $ids = [];
+        foreach ($titles as $t) {
+            $ids[$this->columnId($sheetId, (string)$t)] = (string)$t;
+        }
+        $row = $this->request('GET', "/sheets/$sheetId/rows/$rowId", ['columnIds' => implode(',', array_keys($ids)), 'exclude' => 'nonexistentCells']);
+        $out = array_fill_keys(array_values($ids), '');
+        foreach ($row['cells'] ?? [] as $cell) {
+            $t = $ids[(int)($cell['columnId'] ?? 0)] ?? null;
+            if ($t !== null) {
+                $out[$t] = trim((string)($cell['displayValue'] ?? $cell['value'] ?? ''));
+            }
+        }
+        return $out;
+    }
+
     /** @param array $cells title => value. Returns the new rowId. */
     public function addRow(int $sheetId, array $cells): int
     {
