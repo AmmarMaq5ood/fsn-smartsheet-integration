@@ -212,6 +212,20 @@ $r3 = (new Sync($fake2, false))->run('educators', $CONFIG['sheets']['educators']
 check('hand-made row matched by name when link empty', $r3['action'] === 'update' && $r3['rowId'] === 5, json_encode($r3));
 check('no contact id column needed', !in_array('LP Contact ID', $eduCols, true));
 
+echo "
+Educators: re-sent SOW (new link, same name) updates the row; a different SOW makes a new row
+";
+$fake3 = new FakeSmartsheet($eduCols, [7 => ['Educator Name' => 'Sally Staffer', 'Primary Column' => 'Assistant Educator Services SOW', 'Educator SOW' => 'https://go.foodstreamnetwork.com/documents/old-send']]);
+$r4 = (new Sync($fake3, false))->run('educators', $CONFIG['sheets']['educators'], $sandraDoc);
+check('matched by educator + document', $r4['action'] === 'update' && $r4['rowId'] === 7 && $r4['matchedBy'] === 'educator + document', json_encode($r4));
+check('link refreshed to the new send', ($fake3->rows[7]['Educator SOW'] ?? '') === $sandraDoc->rule('sowUrl'), json_encode($fake3->rows[7] ?? null));
+$otherRaw = $sandra->raw();
+$otherRaw['SOW Document Name'] = 'Lead Educator SOW PS 331';
+$otherRaw['customData']['LP SOW Sent'] = 'https://go.foodstreamnetwork.com/documents/another-doc';
+$otherRaw['SOW Document URL'] = 'https://go.foodstreamnetwork.com/documents/another-doc';
+$r5 = (new Sync($fake3, false))->run('educators', $CONFIG['sheets']['educators'], new Payload($otherRaw));
+check('different SOW for the same educator creates a new row', $r5['action'] === 'create' && $r5['rowId'] !== 7, json_encode($r5));
+
 echo "\nEducators: work order excluded\n";
 $wo = new Payload(array_merge($sandra->raw(), ['SOW Document Name' => '[Work Order] NYC DOE - PS 331']));
 $r = (new Sync(new FakeSmartsheet($eduCols, []), false))->run('educators', $CONFIG['sheets']['educators'], $wo);

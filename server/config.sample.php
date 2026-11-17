@@ -104,7 +104,10 @@ return [
             'reject_doc_keywords'  => ['work order'],   // NYC DOE work orders share the staff workflows
             'require_doc_keywords' => ['contractor', 'educator', 'independent', 'staff', 'program manager'], // Doc Signed fires for school SOWs too
             'find' => [
+                // same document (sent -> signed), then the same SOW re-sent under a new link (edited template),
+                // then a hand-made row that has no link yet. Anything else is a new SOW = new row.
                 ['label' => 'sow link',      'equals' => ['Educator SOW' => ['rule' => 'sowUrl']]],
+                ['label' => 'educator + document', 'equals' => ['Educator Name' => ['rule' => 'fullName'], 'Primary Column' => ['rule' => 'sowName']]],
                 ['label' => 'educator name', 'equals' => ['Educator Name' => ['rule' => 'fullName']], 'empty' => ['Educator SOW']],
             ],
             'create'      => true,
