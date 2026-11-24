@@ -177,6 +177,15 @@ $r = $sync->run('schools', $CONFIG['sheets']['schools'], $withDoc);
 check('skipped', $r['action'] === 'skipped' && $r['reason'] === 'staff document', json_encode($r));
 check('no API calls', $fake->calls === [], json_encode($fake->calls));
 
+echo "
+Schools sync: donation agreement (Disney template) rejected by document name
+";
+$donation = new Payload(array_merge($ylim->raw(), ['SOW Document Name' => 'Disney Agreement Food Donation - Mouse Productions']));
+$fake = new FakeSmartsheet($schoolCols, []);
+$r = (new Sync($fake, false))->run('schools', $CONFIG['sheets']['schools'], $donation);
+check('skipped as excluded document type', $r['action'] === 'skipped' && $r['reason'] === 'document type excluded', json_encode($r));
+check('no API calls', $fake->calls === [], json_encode($fake->calls));
+
 echo "\nSchools sync: new school with no opportunity -> create with fallback name\n";
 $fake = new FakeSmartsheet($schoolCols, [1 => ['SCHOOL NAME' => 'PS 331', 'LP Contact ID' => '']]);
 $sync = new Sync($fake, false);
@@ -265,6 +274,9 @@ echo "\nEducators: work order excluded\n";
 $wo = new Payload(array_merge($sandra->raw(), ['SOW Document Name' => '[Work Order] NYC DOE - PS 331']));
 $r = (new Sync(new FakeSmartsheet($eduCols, []), false))->run('educators', $CONFIG['sheets']['educators'], $wo);
 check('skipped as excluded type', $r['action'] === 'skipped' && $r['reason'] === 'document type excluded', json_encode($r));
+$donationStaff = new Payload(array_merge($sandra->raw(), ['SOW Document Name' => 'Disney Agreement Food Donation - Staff']));
+$r = (new Sync(new FakeSmartsheet($eduCols, []), false))->run('educators', $CONFIG['sheets']['educators'], $donationStaff);
+check('educators: donation agreement skipped', $r['action'] === 'skipped' && $r['reason'] === 'document type excluded', json_encode($r));
 
 echo "\nEducators: signed school SOW not accepted\n";
 $schoolDoc = new Payload(array_merge($sandra->raw(), ['SOW Document Name' => 'PS 175_Food Explorers SOW_2026-27 Agreement']));

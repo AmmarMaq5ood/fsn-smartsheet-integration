@@ -71,6 +71,7 @@ name decides where it lands:
 | document name contains                              | result                                   |
 |-----------------------------------------------------|------------------------------------------|
 | contractor / educator / independent / staff / program manager | skipped for schools (staff sheet handles it) |
+| donation / disney                                   | skipped on both sheets (`reject_doc_keywords`, reason "document type excluded"): Rich's food donation agreements are not SOWs (Nov 24 2026, "for the time being") |
 | work order                                          | written to **LP WO Sent**                |
 | anything else                                       | written to **LP SOW Sent**               |
 

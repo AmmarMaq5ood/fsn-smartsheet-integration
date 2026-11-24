@@ -55,6 +55,7 @@ return [
             'enrich'          => true,   // school facts from the signer's company + the master sheet (Enrich.php)
             'reject_emails'   => ['rich@fsnnyc.com', 'rich@foodstreamnetwork.com'],   // countersigner, not a school
             'reject_if_staff' => true,
+            'reject_doc_keywords' => ['donation', 'disney'],   // Nov 24 2026: Rich's donation agreements (Disney template) stay out of the tracker for now
             'staff_keywords'  => ['contractor', 'educator', 'independent', 'staff', 'program manager'],
             'find' => [
                 ['label' => 'opportunity id', 'equals' => ['LP Opportunity ID' => '{{customData."LP Opportunity ID"}}']],
@@ -120,7 +121,7 @@ return [
             'sheet'   => ['name' => 'Educator SOWs'],
             'require' => ['rule' => 'sowUrl'],
             'reject_emails'        => ['rich@fsnnyc.com', 'rich@foodstreamnetwork.com'],   // Doc Signed fires for Rich's countersignature too
-            'reject_doc_keywords'  => ['work order'],   // NYC DOE work orders share the staff workflows
+            'reject_doc_keywords'  => ['work order', 'donation', 'disney'],   // NYC DOE work orders share the staff workflows; donation agreements (Nov 24 2026) are not SOWs
             'require_doc_keywords' => ['contractor', 'educator', 'independent', 'staff', 'program manager'], // Doc Signed fires for school SOWs too
             'find' => [
                 // same document (sent -> signed), then the same SOW re-sent under a new link (edited template),
